@@ -42,22 +42,46 @@ module.exports = async (kernel) => {
         ]
       }
     }, {
+      // Reserve the port up front so the URL is known before Forge starts.
+      method: "local.set",
+      params: {
+        port: "{{port}}"
+      }
+    }, {
+      // DEVIATION FROM THE CRITICAL PATTERN LOCK — approved by the user.
+      //
+      // The documented pattern derives `url` by regex-matching the server's output.
+      // That does not work for Forge on kernel 8.0.40: neither the canonical
+      // "/http:\/\/[0-9.:]+/" nor the capture-group "/(http:\\/\\/[0-9.:]+)/" ever
+      // matches its "Running on local URL:" line, so the script parked on the
+      // shell.run step forever at state=starting / ready_url=null and the Open Web UI
+      // tab never appeared. Isolation tests confirmed the `on` mechanism, both regex
+      // forms, `env` and `path` all work correctly here, so the cause is specific to
+      // Forge's output stream — most likely the URL being split across read chunks,
+      // since Forge emits ~4.4KB before printing it.
+      //
+      // Setting `url` from the port we already reserved removes the dependency on
+      // matching output at all, and must happen BEFORE the launch step: that step is
+      // the daemon and never returns, so anything after it is not guaranteed to run.
+      method: "local.set",
+      params: {
+        "url": "http://127.0.0.1:{{local.port}}"
+      }
+    }, {
       method: "shell.run",
       params: {
         path: "app",
         message: (kernel.platform === 'win32' ? 'webui-user.bat' : 'bash webui.sh -f'),
-        env,
-        // Capture-group form per the Critical Pattern Lock. The bare-slash variant
-        // ("/http:\/\/[0-9.:]+/") never matched Forge's "Running on local URL:" line
-        // on kernel 8.0.40 — the script parked at this step forever with
-        // state=starting / ready_url=null, so the Open Web UI tab never appeared.
+        // GRADIO_SERVER_PORT is how the reserved port reaches Forge. Passing --port
+        // on the command line would not work: webui-user.bat hardcodes
+        // `set COMMANDLINE_ARGS=--no-download-sd-model`, clobbering anything inherited,
+        // and webui.bat forwards only its own argv. Gradio reads this env var directly
+        // (gradio/networking.py:26) because Forge leaves --port at its None default
+        // (cmd_args.py:78 -> webui.py:87), so this sets the port without touching app/.
+        env: Object.assign({}, env, { GRADIO_SERVER_PORT: "{{local.port}}" }),
+        // Kept as a best-effort advance to proxy.start below. `url` no longer depends
+        // on it, so a missed match now costs only Local Sharing, not the Web UI tab.
         on: [{ "event": "/(http:\\/\\/[0-9.:]+)/", "done": true }]
-      }
-    }, {
-      method: "local.set",
-      params: {
-        // index 1 = the parenthesized capture from the regex above
-        "url": "{{input.event[1]}}",
       }
     }, {
       "method": "proxy.start",
