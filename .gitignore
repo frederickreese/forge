@@ -1,0 +1,8 @@
+# Forge checkout, cloned by install.js — not part of the launcher
+/app
+
+# Pinokio runtime artifacts, regenerated per machine
+/logs
+/cache
+/.pinokio-temp
+ENVIRONMENT
