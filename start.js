@@ -50,22 +50,39 @@ module.exports = async (kernel) => {
     }, {
       // DEVIATION FROM THE CRITICAL PATTERN LOCK — approved by the user.
       //
-      // The documented pattern derives `url` by regex-matching the server's output.
-      // That does not work for Forge on kernel 8.0.40: neither the canonical
-      // "/http:\/\/[0-9.:]+/" nor the capture-group "/(http:\\/\\/[0-9.:]+)/" ever
-      // matches its "Running on local URL:" line, so the script parked on the
-      // shell.run step forever at state=starting / ready_url=null and the Open Web UI
-      // tab never appeared. Isolation tests confirmed the `on` mechanism, both regex
-      // forms, `env` and `path` all work correctly here, so the cause is specific to
-      // Forge's output stream — most likely the URL being split across read chunks,
-      // since Forge emits ~4.4KB before printing it.
+      // The documented pattern derives `url` by regex-matching the server's output via
+      // the shell.run `on` handler. That handler does not fire at all on this kernel
+      // (8.0.40). Isolation test, 2026-08-09: a throwaway script ran
+      // `echo Startup time: 19.2s ...` with `on: [{ event: "/Startup time:/",
+      // done: true }]`. The line is right there in the shell log at t+0s, yet the next
+      // step did not run until t+60s, when the shell finished its last command on its
+      // own — and its `input` was `{id}` alone, with no `event` key, which an
+      // event-driven advance would have carried. So the miss is not about Forge's
+      // output or the pattern; `on` simply never matches here.
       //
-      // Setting `url` from the port we already reserved removes the dependency on
-      // matching output at all, and must happen BEFORE the launch step: that step is
-      // the daemon and never returns, so anything after it is not guaranteed to run.
+      // Everything downstream follows from that:
+      //   - `url` cannot be captured from output, so it is built from the port
+      //     reserved above.
+      //   - This step must run BEFORE the launch step. Without a firing `on`, that
+      //     step never returns (docs: a shell.run with no `on` ends only at the next
+      //     terminal prompt), so any step after it is unreachable.
+      // A readiness gate is what belongs here — `process.wait` on
+      // `tcp:127.0.0.1:{{local.port}}` would express it exactly — but it is
+      // unreachable for the same reason, so the Open Web UI tab necessarily appears
+      // while Forge is still booting (~20-35s). Clicking it early returns a connection
+      // error; that is the launch still starting, not a failure.
       method: "local.set",
       params: {
         "url": "http://127.0.0.1:{{local.port}}"
+      }
+    }, {
+      // Also before the launch step, and for the same reason: after it, this would
+      // never run. Registering the proxy ahead of the server is fine — it maps the
+      // URL, and starts serving once Forge binds the port.
+      "method": "proxy.start",
+      "params": {
+        "uri": "{{local.url}}",
+        "name": "Local Sharing"
       }
     }, {
       method: "shell.run",
@@ -78,16 +95,10 @@ module.exports = async (kernel) => {
         // and webui.bat forwards only its own argv. Gradio reads this env var directly
         // (gradio/networking.py:26) because Forge leaves --port at its None default
         // (cmd_args.py:78 -> webui.py:87), so this sets the port without touching app/.
-        env: Object.assign({}, env, { GRADIO_SERVER_PORT: "{{local.port}}" }),
-        // Kept as a best-effort advance to proxy.start below. `url` no longer depends
-        // on it, so a missed match now costs only Local Sharing, not the Web UI tab.
-        on: [{ "event": "/(http:\\/\\/[0-9.:]+)/", "done": true }]
-      }
-    }, {
-      "method": "proxy.start",
-      "params": {
-        "uri": "{{local.url}}",
-        "name": "Local Sharing"
+        env: Object.assign({}, env, { GRADIO_SERVER_PORT: "{{local.port}}" })
+        // No `on` handler: it would never fire (see above), and without one the shell
+        // stays in the foreground for the life of the server, which is what a daemon
+        // script wants.
       }
     }]
   }

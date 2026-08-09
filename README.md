@@ -32,7 +32,7 @@ Once installed:
 | Menu item | Script | What it does |
 |---|---|---|
 | **Start** | `start.js` | Launches the Web UI (shown while stopped) |
-| **Open Web UI** | — | Opens the running server; appears only once the URL has been published |
+| **Open Web UI** | — | Opens the running server; appears as soon as Start is clicked (see below) |
 | **Terminal** | `start.js` | Shows the running server's console output |
 | **Download Models** | — | Submenu of one-click model downloads (see below) |
 | **Update** | `update.json` | Pulls the latest launcher and app code |
@@ -42,6 +42,8 @@ Once installed:
 Click **Install** first. When it finishes, click **Start**, then open the **Open Web UI** tab.
 
 The port is assigned automatically at launch, so several apps can run side by side without conflicting. The chosen URL appears in the sidebar; it is not fixed at 7860.
+
+**Forge takes roughly 20-35 seconds to come up**, and the **Open Web UI** tab appears immediately, before the server is listening. Opening it too early returns a connection error — that is the launch still starting, not a failure. Watch the **Terminal** tab and wait for `Running on local URL:`, then open it.
 
 ### Download Models
 
@@ -212,9 +214,11 @@ To repair an existing install, either:
 - **Place the file by hand.** Download `vaeapprox-sdxl.pt` (and `model.pt` if absent) from the [Automatic1111 v1.0.0-pre release](https://github.com/AUTOMATIC1111/stable-diffusion-webui/releases/tag/v1.0.0-pre) into `app/models/VAE-approx/`.
 - **Or turn off live previews.** In **Settings → Live previews**, uncheck *Show live previews of the created image*.
 
-### The Web UI tab does not appear
+### The Web UI tab opens to a connection error
 
-Check `logs/api/start.js/latest` for a Python traceback. If Forge crashed during startup, Pinokio will keep reporting `starting` and no URL will be published.
+Almost always this means Forge is still booting — give it 20-35 seconds and try again. The tab is published before the server binds the port, so it is clickable well before it works.
+
+If it still fails after a minute, check `logs/api/start.js/latest`. Note that `*** Error loading script: preprocessor_marigold.py` with `ImportError: cannot import name 'cached_download'` is expected and harmless: `huggingface_hub` dropped that function, so the Marigold depth preprocessor cannot load. Forge starts normally without it. Look for a traceback *after* that point instead, and for the `Running on local URL:` line, which is the server actually coming up.
 
 ### Starting fails after a previously interrupted install
 
@@ -224,7 +228,7 @@ A failed clone can leave an empty `app/repositories/stable-diffusion-stability-a
 
 - `Stability-AI/stablediffusion` was taken down upstream, so `STABLE_DIFFUSION_REPO` points at a mirror carrying the same pinned commit (`cf1d67a6`). Git verifies the hash on checkout, so the resulting tree is identical to the original.
 - NumPy and OpenCV are pinned (`numpy==1.26.2`, `opencv-*==4.8.0.76`). Newer OpenCV requires NumPy 2, which breaks the NumPy 1.x ABI that this build of torch and scikit-image were compiled against.
-- The Web UI URL is derived from a port reserved by Pinokio and passed to Forge via `GRADIO_SERVER_PORT`, rather than scraped from the server's output.
+- The Web UI URL is derived from a port reserved by Pinokio and passed to Forge via `GRADIO_SERVER_PORT`, rather than scraped from the server's output. This is a workaround: on Pinokio 8.0.40 the `shell.run` `on` handler never fires, verified in isolation with a script that echoed a line and a pattern matching it — the next step ran only when the shell finished on its own, with no `event` in its `input`. Because nothing advances the launch step, every step after it is unreachable, so `url` and the shared proxy are both set up front. That also rules out a readiness gate (`process.wait` on `tcp:127.0.0.1:PORT`), which is why the tab is offered before the server is listening. If `on` starts working on a later kernel, move both steps after the launch and add that wait.
 
 ## Credits
 
