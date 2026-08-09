@@ -193,19 +193,24 @@ Pinokio writes every script's terminal output to `logs/api/<script>/`, one file 
 
 ### `SSLError: [ASN1: NOT_ENOUGH_DATA]` on the first generation
 
-The first generation downloads a small VAE-approx model used for live previews. If Python cannot parse your Windows certificate store, that download fails and the whole request returns a 500:
+**The installer now prevents this**, so you should only meet it on an install created before that change.
+
+The first generation needs a small VAE-approx model for live previews, which Forge fetches over HTTPS. If Python cannot parse your Windows certificate store, that download fails and the whole request returns a 500:
 
 ```
 Downloading VAEApprox model to: ...\models\VAE-approx\vaeapprox-sdxl.pt
 ssl.SSLError: [ASN1: NOT_ENOUGH_DATA] not enough data (_ssl.c:4030)
 ```
 
-The failure is in `ssl.create_default_context()` itself, which loads the Windows cert store before consulting `SSL_CERT_FILE`, so setting `SSL_CERT_FILE` or `REQUESTS_CA_BUNDLE` does **not** help. Generation itself is unaffected — only the preview model download.
+The failure is inside `ssl.create_default_context()`, which loads the Windows cert store before consulting `SSL_CERT_FILE`, so setting `SSL_CERT_FILE` or `REQUESTS_CA_BUNDLE` does **not** help. Generation itself is unaffected — only the preview model download.
 
-Either of these resolves it:
+`install.js` sidesteps it by pre-placing both files with Pinokio's own downloader, which is Node-based and unaffected. Forge only downloads when a file is missing, so it never makes the failing call. Note that Forge ships `model.pt` in its repository but not `vaeapprox-sdxl.pt`, which is why this bites SDXL checkpoints specifically.
 
-- **Pre-place the file.** Download `vaeapprox-sdxl.pt` (and `model.pt` for SD1.5 checkpoints) from the [Automatic1111 v1.0.0-pre release](https://github.com/AUTOMATIC1111/stable-diffusion-webui/releases/tag/v1.0.0-pre) into `app/models/VAE-approx/`. Forge only downloads when the file is missing.
-- **Turn off live previews.** In **Settings → Live previews**, uncheck *Show live previews of the created image*.
+To repair an existing install, either:
+
+- **Re-run Install** from the sidebar. It skips files that already exist, so this costs one ~209KB download.
+- **Place the file by hand.** Download `vaeapprox-sdxl.pt` (and `model.pt` if absent) from the [Automatic1111 v1.0.0-pre release](https://github.com/AUTOMATIC1111/stable-diffusion-webui/releases/tag/v1.0.0-pre) into `app/models/VAE-approx/`.
+- **Or turn off live previews.** In **Settings → Live previews**, uncheck *Show live previews of the created image*.
 
 ### The Web UI tab does not appear
 

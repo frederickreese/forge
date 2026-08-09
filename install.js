@@ -133,6 +133,29 @@ module.exports = async (kernel) => {
         dir: "app/models/Stable-diffusion"
       }
     }, {
+      // Pre-place the live-preview models so Forge never has to fetch them itself.
+      //
+      // On the first generation, modules/sd_vae_approx.py:39 pulls these through
+      // torch.hub.download_url_to_file, which uses urllib's default HTTPS context.
+      // On machines where Python cannot parse the Windows certificate store that
+      // throws `ssl.SSLError: [ASN1: NOT_ENOUGH_DATA]` inside
+      // ssl.create_default_context(), and the whole request fails with a 500 even
+      // though generation itself is fine. SSL_CERT_FILE and REQUESTS_CA_BUNDLE do
+      // not help, because the Windows store is loaded before either is consulted.
+      //
+      // Pinokio's downloader is Node-based and unaffected, and sd_vae_approx.py
+      // only downloads when the file is missing, so fetching them here sidesteps
+      // the problem entirely. Two files, ~209KB each: vaeapprox-sdxl.pt for SDXL
+      // checkpoints and model.pt for everything else (sd_vae_approx.py:43).
+      method: "fs.download",
+      params: {
+        uri: [
+          "https://github.com/AUTOMATIC1111/stable-diffusion-webui/releases/download/v1.0.0-pre/vaeapprox-sdxl.pt",
+          "https://github.com/AUTOMATIC1111/stable-diffusion-webui/releases/download/v1.0.0-pre/model.pt"
+        ],
+        dir: "app/models/VAE-approx"
+      }
+    }, {
       uri: "setup.js",
       method: "write"
     }, {
