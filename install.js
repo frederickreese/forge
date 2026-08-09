@@ -3,13 +3,15 @@ module.exports = async (kernel) => {
   let warmupEnv = {
     SD_WEBUI_RESTARTING: 1,
     // github.com/Stability-AI/stablediffusion was taken down (404), so Forge's
-    // hardcoded default in modules/launch_utils.py can no longer be cloned.
-    // Point it at a mirror that carries the same pinned commit
-    // (cf1d67a6fd5ea1aa600c4df58e5b47da45f6bdbf). Forge checks that hash out, and
-    // git verifies it, so the resulting tree is identical to the original.
-    STABLE_DIFFUSION_REPO: "https://github.com/licyk/stablediffusion.git",
-    // Without this, a missing/private repo makes Git Credential Manager open a
-    // browser auth prompt that hangs the shell instead of failing fast.
+    // hardcoded default in modules/launch_utils.py can no longer be cloned. The
+    // parts it uses are vendored under vendor/ instead — see PROVENANCE.md there.
+    // vendor_sd.py puts that tree in place and records the hash of the local
+    // commit it makes; handing it back as STABLE_DIFFUSION_COMMIT_HASH is what
+    // makes git_clone() skip cloning (modules/launch_utils.py:186).
+    STABLE_DIFFUSION_COMMIT_HASH: "{{local.sd.hash}}",
+    // Belt and braces: if the tree ever does go missing, this makes the clone
+    // attempt fail fast instead of Git Credential Manager opening a browser auth
+    // prompt that hangs the shell.
     GIT_TERMINAL_PROMPT: 0
   }
 
@@ -159,14 +161,19 @@ module.exports = async (kernel) => {
       uri: "setup.js",
       method: "write"
     }, {
-      // A previously failed clone can leave an empty .git husk behind. Forge's
-      // git_clone() then takes its "already exists" branch and aborts instead of
-      // re-cloning. A valid clone always contains ldm/; if that is missing, drop
-      // the husk so the mirror clone below can run.
-      when: "{{exists('app/repositories/stable-diffusion-stability-ai') && !exists('app/repositories/stable-diffusion-stability-ai/ldm')}}",
-      method: "fs.rm",
+      // Put the vendored Stable Diffusion tree in place before the warm-up below,
+      // which is what runs prepare_environment() and would otherwise try to clone
+      // the dead upstream repository. Verifies all 73 files against
+      // MANIFEST.sha256 and refuses to continue on a mismatch.
+      method: "shell.run",
       params: {
-        path: "app/repositories/stable-diffusion-stability-ai"
+        message: "python vendor_sd.py"
+      }
+    }, {
+      // Hash of the local commit vendor_sd.py just made, read back for warmupEnv.
+      method: "json.get",
+      params: {
+        sd: "app/.sd-vendor-commit.json"
       }
     }, warmup, {
       // Runs after the step above, because that is what installs Forge's base and

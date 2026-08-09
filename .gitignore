@@ -6,3 +6,4 @@
 /cache
 /.pinokio-temp
 ENVIRONMENT
+__pycache__/

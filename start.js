@@ -2,13 +2,15 @@ module.exports = async (kernel) => {
   let env = {
     SD_WEBUI_RESTARTING: 1,
     // github.com/Stability-AI/stablediffusion was taken down (404), so Forge's
-    // hardcoded default in modules/launch_utils.py can no longer be cloned.
-    // Point it at a mirror that carries the same pinned commit
-    // (cf1d67a6fd5ea1aa600c4df58e5b47da45f6bdbf). Forge checks that hash out, and
-    // git verifies it, so the resulting tree is identical to the original.
-    STABLE_DIFFUSION_REPO: "https://github.com/licyk/stablediffusion.git",
-    // Without this, a missing/private repo makes Git Credential Manager open a
-    // browser auth prompt that hangs the shell instead of failing fast.
+    // hardcoded default in modules/launch_utils.py can no longer be cloned. The
+    // parts it uses are vendored under vendor/ instead — see PROVENANCE.md there.
+    // vendor_sd.py puts that tree in place and records the hash of the local
+    // commit it makes; handing it back as STABLE_DIFFUSION_COMMIT_HASH is what
+    // makes git_clone() skip cloning (modules/launch_utils.py:186).
+    STABLE_DIFFUSION_COMMIT_HASH: "{{local.sd.hash}}",
+    // Belt and braces: if the tree ever does go missing, this makes the clone
+    // attempt fail fast instead of Git Credential Manager opening a browser auth
+    // prompt that hangs the shell.
     GIT_TERMINAL_PROMPT: 0
   }
   if (kernel.platform === 'darwin' && kernel.arch === 'x64') {
@@ -17,14 +19,21 @@ module.exports = async (kernel) => {
   return {
     daemon: true,
     run: [{
-      // A failed clone can leave an empty .git husk behind. Forge's git_clone()
-      // then takes its "already exists" branch and aborts instead of re-cloning,
-      // so the launcher can never self-heal. A valid clone always contains ldm/;
-      // if that is missing, drop the husk so the mirror clone can run.
-      when: "{{exists('app/repositories/stable-diffusion-stability-ai') && !exists('app/repositories/stable-diffusion-stability-ai/ldm')}}",
-      method: "fs.rm",
+      // Verify the vendored Stable Diffusion tree and put it in place if it is
+      // missing or damaged. Idempotent and cheap — a clean tree is 73 SHA-256
+      // sums over ~1MB — and it runs every launch so a deleted or half-written
+      // repositories/ directory heals itself instead of failing the start.
+      method: "shell.run",
       params: {
-        path: "app/repositories/stable-diffusion-stability-ai"
+        message: "python vendor_sd.py"
+      }
+    }, {
+      // Hash of the local commit vendor_sd.py just made, read back for the env
+      // above. Written to app/, which is not part of the launcher repo, because
+      // it describes this machine's checkout rather than the launcher.
+      method: "json.get",
+      params: {
+        sd: "app/.sd-vendor-commit.json"
       }
     }, {
       // opencv-python 5.x hard-requires numpy>=2, which overrides Forge's own

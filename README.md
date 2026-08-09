@@ -222,11 +222,13 @@ If it still fails after a minute, check `logs/api/start.js/latest`. Note that `*
 
 ### Starting fails after a previously interrupted install
 
-A failed clone can leave an empty `app/repositories/stable-diffusion-stability-ai` directory behind, which stops Forge from ever re-cloning it. `start.js` detects and clears this automatically, but if you hit it in another checkout, delete that folder and start again.
+`app/repositories/stable-diffusion-stability-ai` can be left empty or half-written. Every launch runs `vendor_sd.py`, which checks that directory against `MANIFEST.sha256` and rebuilds it from `vendor/` when anything is missing or altered, so this heals itself. If you want to force it, delete the directory and start again.
+
+If a launch instead stops with a message about the vendored tree not matching the manifest, the copy under `vendor/` has been modified or corrupted — restore it with `git checkout -- vendor/` rather than editing the manifest.
 
 ## Notes on this launcher
 
-- `Stability-AI/stablediffusion` was taken down upstream, so `STABLE_DIFFUSION_REPO` points at a mirror carrying the same pinned commit (`cf1d67a6`). Git verifies the hash on checkout, so the resulting tree is identical to the original.
+- `Stability-AI/stablediffusion` was taken down upstream, so there is nothing left for Forge to clone. The parts it actually loads — the `ldm` package and `configs/stable-diffusion` — are vendored under `vendor/stable-diffusion-stability-ai/`, byte-identical to the pinned commit `cf1d67a6`. `vendor_sd.py` verifies all 73 files against `MANIFEST.sha256` and installs them on first launch, so no install depends on a third-party mirror staying up. See `vendor/stable-diffusion-stability-ai/PROVENANCE.md` for what is included, why, and how to re-verify it against upstream. The vendored subset is ~1 MB against the upstream commit's 149 MB, most of which is example imagery Forge never touches.
 - NumPy and OpenCV are pinned (`numpy==1.26.2`, `opencv-*==4.8.0.76`). Newer OpenCV requires NumPy 2, which breaks the NumPy 1.x ABI that this build of torch and scikit-image were compiled against.
 - The Web UI URL is derived from a port reserved by Pinokio and passed to Forge via `GRADIO_SERVER_PORT`, rather than scraped from the server's output. This is a workaround: on Pinokio 8.0.40 the `shell.run` `on` handler never fires, verified in isolation with a script that echoed a line and a pattern matching it — the next step ran only when the shell finished on its own, with no `event` in its `input`. Because nothing advances the launch step, every step after it is unreachable, so `url` and the shared proxy are both set up front. That also rules out a readiness gate (`process.wait` on `tcp:127.0.0.1:PORT`), which is why the tab is offered before the server is listening. If `on` starts working on a later kernel, move both steps after the launch and add that wait.
 
